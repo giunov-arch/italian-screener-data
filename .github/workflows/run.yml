@@ -24,5 +24,5 @@ jobs:
       - name: Run Screener Script
         env:
           CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
-          GITHUB_SECRET: ${{ secrets.GITHUB_SECRET }}
+          GITHUB_SECRET: ${{ secrets.GIT_SECRET }}
         run: python screener.py
