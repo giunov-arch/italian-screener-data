@@ -1,19 +1,27 @@
 name: Daily Italian Screener
+
 on:
   schedule:
-    - cron: '0 17 * * 1-5' # 17:00 UTC (18:00 CET) Mon-Fri
-  workflow_dispatch: # Allows manual testing
+    # Runs at 17:00 UTC (18:00 CET) every Monday through Friday
+    - cron: '0 17 * * 1-5' 
+  workflow_dispatch: # Allows you to click a button to test it manually
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Set up Python
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
-        with: { python-version: '3.10' }
+        with:
+          python-version: '3.10'
+          
       - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Run Screener
+        
+      - name: Run Screener Script
         env:
           CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
           GITHUB_SECRET: ${{ secrets.GITHUB_SECRET }}
