@@ -16,7 +16,11 @@ TICKERS = [
 WORKER_URL = os.environ.get('CLOUDFLARE_WORKER_URL')
 SECRET = os.environ.get('GIT_SECRET') 
 
-HEADERS = {'Authorization': f'Bearer {SECRET}', 'Content-Type': 'application/json'}
+HEADERS = {
+       'Authorization': f'Bearer {SECRET}', 
+       'Content-Type': 'application/json',
+       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+   }
 
 def calculate_rsi(prices, period=14):
     delta = prices.diff()
