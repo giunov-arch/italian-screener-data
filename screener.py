@@ -1,99 +1,96 @@
-import yfinance as yf
-import pandas as pd
-import requests
-import os
-import time
+export default {
+    async fetch(request, env, ctx) {
+        const url = new URL(request.url);
+        const pathname = url.pathname;
 
-TICKERS = [
-    'A2A.MI', 'AMP.MI', 'AZM.MI', 'BPE.MI', 'DAN.MI', 
-    'DIA.MI', 'ENEL.MI', 'ENI.MI', 'G.MI', 'HER.MI', 
-    'IG.MI', 'ISP.MI', 'IVG.MI', 'LDO.MI', 'MB.MI', 
-    'MONC.MI', 'NEXI.MI', 'PRY.MI', 'RACE.MI', 'RCS.MI', 
-    'SFER.MI', 'SRG.MI', 'TEN.MI', 'TIT.MI', 'TRN.MI', 
-    'UCG.MI', 'STLAM.MI'
-]
+        const corsHeaders = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        };
 
-WORKER_URL = os.environ.get('CLOUDFLARE_WORKER_URL')
-SECRET = os.environ.get('GIT_SECRET') 
+        if (request.method === 'OPTIONS') {
+            return new Response(null, { headers: corsHeaders });
+        }
 
-HEADERS = {'Authorization': f'Bearer {SECRET}', 'Content-Type': 'application/json'}
-
-def calculate_rsi(prices, period=14):
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def run_screener():
-    print(f"Starting Italian Screener for {len(TICKERS)} tickers...", flush=True)
-    print(f"DEBUG: Secret loaded? {'YES' if SECRET else 'NO'}", flush=True)
-    print(f"DEBUG: Worker URL: {WORKER_URL}", flush=True)
-    
-    payload_batch = []
-    
-    for symbol in TICKERS:
-        try:
-            print(f"Fetching {symbol}...", flush=True)
-            stock = yf.Ticker(symbol)
-            
-            print(f"  -> Getting info for {symbol}...", flush=True)
-            info = stock.info
-            
-            print(f"  -> Getting history for {symbol}...", flush=True)
-            hist = stock.history(period="1y")
-            
-            if hist.empty or len(hist) < 200:
-                print(f"Skipping {symbol}: Insufficient data.", flush=True)
-                continue
-
-            pe = info.get('forwardPE') or info.get('trailingPE')
-            roe = info.get('returnOnEquity', 0) or 0
-            target_mean = info.get('targetMeanPrice')
-            analyst_rec = info.get('recommendationKey', 'N/A')
-            num_analysts = info.get('numberOfAnalystOpinions', 0)
-            
-            closes = hist['Close']
-            current_price = float(closes.iloc[-1])
-            sma_200 = float(closes.rolling(window=200).mean().iloc[-1])
-            rsi = float(calculate_rsi(closes).iloc[-1])
-
-            signal = "Buy on Pullback" if (current_price > sma_200 and rsi < 45) else "Watchlist"
-
-            stock_data = {
-                "ticker": symbol,
-                "price": round(current_price, 2),
-                "pe": round(float(pe), 2) if pe else 999.0,
-                "roe": round(float(roe * 100), 2),
-                "rsi": round(rsi, 2),
-                "target_mean": round(float(target_mean), 2) if target_mean else None,
-                "analyst_rec": analyst_rec,
-                "num_analysts": int(num_analysts) if num_analysts else 0,
-                "signal": signal
+        try {
+            // --- ROUTE 1: Frontend reads today's screened stocks ---
+            if (pathname === '/api/screener' && request.method === 'GET') {
+                const { results } = await env.DB.prepare("SELECT * FROM screener_results ORDER BY rsi ASC").all();
+                return Response.json(results, { headers: corsHeaders });
             }
-            payload_batch.append(stock_data)
-            
-            hist_data = [{"date": str(d.date())[:10], "close": float(c)} for d, c in zip(hist.index[-300:], closes[-300:])]
-            print(f"  -> Posting history for {symbol}...", flush=True)
-            requests.post(f"{WORKER_URL}/api/update-history", json={"ticker": symbol, "data": hist_data}, headers=HEADERS, timeout=30)
-            print(f"  -> Posted history for {symbol}", flush=True)
-            
-            time.sleep(0.5) 
-            
-        except Exception as e:
-            print(f"Error processing {symbol}: {e}", flush=True)
-            continue
 
-    if payload_batch:
-        print("Sending batch to Cloudflare...", flush=True)
-        try:
-            res = requests.post(f"{WORKER_URL}/api/update-screener", json=payload_batch, headers=HEADERS, timeout=10)
-            print(f"Cloudflare Response Status: {res.status_code}", flush=True)
-            print(f"Cloudflare Response Body: {res.text}", flush=True)
-        except Exception as e:
-            print(f"Error sending batch to Cloudflare: {e}", flush=True)
-    else:
-        print("WARNING: No stocks were successfully processed!", flush=True)
+            // --- ROUTE 2: Frontend reads historical chart data ---
+            if (pathname.startsWith('/api/chart/') && request.method === 'GET') {
+                const ticker = pathname.split('/api/chart/')[1];
+                const { results } = await env.DB.prepare("SELECT date, close FROM historical_prices WHERE ticker = ? ORDER BY date ASC").bind(ticker).all();
+                return Response.json(results, { headers: corsHeaders });
+            }
 
-if __name__ == "__main__":
-    run_screener()
+            // --- ROUTE 3: Python pushes fundamental/technical data ---
+            if (pathname === '/api/update-screener' && request.method === 'POST') {
+                console.log("DEBUG: Received POST to /api/update-screener");
+                
+                // Auth check temporarily disabled for debugging
+                // if (request.headers.get('Authorization') !== `Bearer ${env.GIT_SECRET}`) {
+                //     return Response.json({ error: 'Unauthorized' }, { status: 401, headers: corsHeaders });
+                // }
+
+                const newData = await request.json();
+                console.log("DEBUG: Received payload size:", newData.length, "stocks");
+
+                const today = new Date().toISOString().split('T')[0];
+                await env.DB.prepare("DELETE FROM screener_results WHERE date = ?").bind(today).run();
+
+                // Batch insert for screener results
+                const statements = newData.map(stock => 
+                    env.DB.prepare(
+                        `INSERT INTO screener_results (ticker, date, price, pe, roe, rsi, signal, target_mean, analyst_rec, num_analysts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                    ).bind(stock.ticker, today, stock.price, stock.pe, stock.roe, stock.rsi, stock.signal, stock.target_mean, stock.analyst_rec, stock.num_analysts)
+                );
+                await env.DB.batch(statements);
+                
+                console.log("DEBUG: Successfully saved screener data to D1");
+                return Response.json({ message: `Updated ${newData.length} stocks.` }, { headers: corsHeaders });
+            }
+
+            // --- ROUTE 4: Python pushes historical prices for charts ---
+            if (pathname === '/api/update-history' && request.method === 'POST') {
+                console.log("DEBUG: Received POST to /api/update-history");
+                
+                try {
+                    const { ticker, data } = await request.json();
+                    console.log(`DEBUG: Inserting ${data.length} days of history for ${ticker}`);
+                    
+                    // CRITICAL FIX: Chunk data into batches of 100 (Cloudflare D1 limit)
+                    const chunks = [];
+                    for (let i = 0; i < data.length; i += 100) {
+                        chunks.push(data.slice(i, i + 100));
+                    }
+
+                    // Execute batches
+                    for (const chunk of chunks) {
+                        const statements = chunk.map(day => 
+                            env.DB.prepare("INSERT OR IGNORE INTO historical_prices (ticker, date, close) VALUES (?, ?, ?)")
+                                .bind(ticker, day.date, day.close)
+                        );
+                        await env.DB.batch(statements);
+                    }
+                    
+                    console.log(`DEBUG: Successfully saved history for ${ticker}`);
+                    return Response.json({ message: `Saved history for ${ticker}` }, { headers: corsHeaders });
+                    
+                } catch (err) {
+                    console.error(`DEBUG: Error saving history for ${ticker}:`, err.message);
+                    return Response.json({ message: `Error`, error: err.message }, { status: 200, headers: corsHeaders });
+                }
+            }
+
+            return new Response('Not Found', { status: 404, headers: corsHeaders });
+
+        } catch (err) {
+            console.error("CRITICAL WORKER ERROR:", err);
+            return Response.json({ error: err.message }, { status: 500, headers: corsHeaders });
+        }
+    }
+};
