@@ -14,7 +14,7 @@ TICKERS = [
 ]
 
 WORKER_URL = os.environ.get('CLOUDFLARE_WORKER_URL')
-SECRET = os.environ.get('GIT_SECRET')
+SECRET = os.environ.get('GITHUB_SECRET')
 HEADERS = {'Authorization': f'Bearer {SECRET}', 'Content-Type': 'application/json'}
 
 def calculate_rsi(prices, period=14):
