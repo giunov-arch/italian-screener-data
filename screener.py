@@ -3,18 +3,18 @@ import pandas as pd
 import requests
 import os
 
-# CORRECTED FTSE MIB 40 TICKERS FOR YAHOO FINANCE
+# CLEANED FTSE MIB TICKERS (Removed delisted/broken ones)
 TICKERS = [
-    'A2A.MI', 'AMP.MI', 'AZM.MI', 'BPE.MI', 'CNHI.MI', 'DAN.MI', 
-    'DIA.MI', 'EL.MI', 'ENEL.MI', 'ENI.MI', 'G.MI', 'HER.MI', 
-    'IG.MI', 'ISP.MI', 'IVG.MI', 'LDO.MI', 'MB.MI', 'MONC.MI', 
-    'NEXI.MI', 'PIR.MI', 'PRY.MI', 'RACE.MI', 'RCS.MI', 'SFER.MI', 
-    'SRG.MI', 'STM.MI', 'TEN.MI', 'TEG.MI', 'TIT.MI', 'TRN.MI', 
-    'UCG.MI', 'US.MI', 'STLAM.MI'
+    'A2A.MI', 'AMP.MI', 'AZM.MI', 'BPE.MI', 'DAN.MI', 
+    'DIA.MI', 'ENEL.MI', 'ENI.MI', 'G.MI', 'HER.MI', 
+    'IG.MI', 'ISP.MI', 'IVG.MI', 'LDO.MI', 'MB.MI', 
+    'MONC.MI', 'NEXI.MI', 'PRY.MI', 'RACE.MI', 'RCS.MI', 
+    'SFER.MI', 'SRG.MI', 'TEN.MI', 'TIT.MI', 'TRN.MI', 
+    'UCG.MI', 'STLAM.MI'
 ]
 
 WORKER_URL = os.environ.get('CLOUDFLARE_WORKER_URL')
-SECRET = os.environ.get('GIT_SECRET')
+SECRET = os.environ.get('GITHUB_SECRET')
 HEADERS = {'Authorization': f'Bearer {SECRET}', 'Content-Type': 'application/json'}
 
 def calculate_rsi(prices, period=14):
@@ -34,28 +34,23 @@ def run_screener():
             info = stock.info
             hist = stock.history(period="1y")
             
-            # Safety check: Skip if no data found
             if hist.empty or len(hist) < 200:
                 print(f"Skipping {symbol}: Insufficient historical data.")
                 continue
 
-            # Extract Fundamentals & Analyst Data
             pe = info.get('forwardPE') or info.get('trailingPE')
             roe = info.get('returnOnEquity', 0) or 0
             target_mean = info.get('targetMeanPrice')
             analyst_rec = info.get('recommendationKey', 'N/A')
             num_analysts = info.get('numberOfAnalystOpinions', 0)
             
-            # Calculate Technicals
             closes = hist['Close']
             current_price = float(closes.iloc[-1])
             sma_200 = float(closes.rolling(window=200).mean().iloc[-1])
             rsi = float(calculate_rsi(closes).iloc[-1])
 
-            # Determine Signal
             signal = "Buy on Pullback" if (current_price > sma_200 and rsi < 45) else "Watchlist"
 
-            # Format Payload
             stock_data = {
                 "ticker": symbol,
                 "price": round(current_price, 2),
@@ -69,16 +64,13 @@ def run_screener():
             }
             payload_batch.append(stock_data)
             
-            # Push Historical Prices for the Frontend Chart
             hist_data = [{"date": str(d.date())[:10], "close": float(c)} for d, c in zip(hist.index[-300:], closes[-300:])]
             requests.post(f"{WORKER_URL}/api/update-history", json={"ticker": symbol, "data": hist_data}, headers=HEADERS)
             
         except Exception as e:
-            # CRITICAL FIX: Log error but DO NOT stop the script
             print(f"Error processing {symbol}: {e}")
             continue
 
-    # Push all fundamentals in one batch
     if payload_batch:
         res = requests.post(f"{WORKER_URL}/api/update-screener", json=payload_batch, headers=HEADERS)
         print(f"Successfully updated {len(payload_batch)} stocks in database: {res.status_code}")
