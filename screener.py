@@ -75,7 +75,7 @@ def run_screener():
             
             hist_data = [{"date": str(d.date())[:10], "close": float(c)} for d, c in zip(hist.index[-300:], closes[-300:])]
             print(f"  -> Posting history for {symbol}...", flush=True)
-            requests.post(f"{WORKER_URL}/api/update-history", json={"ticker": symbol, "data": hist_data}, headers=HEADERS, timeout=10)
+            requests.post(f"{WORKER_URL}/api/update-history", json={"ticker": symbol, "data": hist_data}, headers=HEADERS, timeout=30)
             print(f"  -> Posted history for {symbol}", flush=True)
             
             time.sleep(0.5) 
