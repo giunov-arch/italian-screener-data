@@ -3,13 +3,14 @@ import pandas as pd
 import requests
 import os
 
-# The FTSE MIB 40 Components (Major Italian Equities)
+# CORRECTED FTSE MIB 40 TICKERS FOR YAHOO FINANCE
 TICKERS = [
-    'A2A.MI', 'AMP.MI', 'AZM.MI', 'BAMI.MI', 'BPER.MI', 'CNH.MI', 'DANO.MI', 
-    'DIA.MI', 'ENEL.MI', 'ENI.MI', 'EXOR.MI', 'G.MI', 'HERA.MI', 'IG.MI', 
-    'ISP.MI', 'IVE.MI', 'LDO.MI', 'LUX.MI', 'MED.MI', 'MONC.MI', 'NEXI.MI', 
-    'PIRE.MI', 'POST.MI', 'PRY.MI', 'RACE.MI', 'RCS.MI', 'SFER.MI', 'SNAM.MI', 
-    'STM.MI', 'TEN.MI', 'TERN.MI', 'TIT.MI', 'TRN.MI', 'UCG.MI', 'UNV.MI', 'STLAM.MI'
+    'A2A.MI', 'AMP.MI', 'AZM.MI', 'BPE.MI', 'CNHI.MI', 'DAN.MI', 
+    'DIA.MI', 'EL.MI', 'ENEL.MI', 'ENI.MI', 'G.MI', 'HER.MI', 
+    'IG.MI', 'ISP.MI', 'IVG.MI', 'LDO.MI', 'MB.MI', 'MONC.MI', 
+    'NEXI.MI', 'PIR.MI', 'PRY.MI', 'RACE.MI', 'RCS.MI', 'SFER.MI', 
+    'SRG.MI', 'STM.MI', 'TEN.MI', 'TEG.MI', 'TIT.MI', 'TRN.MI', 
+    'UCG.MI', 'US.MI', 'STLAM.MI'
 ]
 
 WORKER_URL = os.environ.get('CLOUDFLARE_WORKER_URL')
@@ -33,7 +34,9 @@ def run_screener():
             info = stock.info
             hist = stock.history(period="1y")
             
+            # Safety check: Skip if no data found
             if hist.empty or len(hist) < 200:
+                print(f"Skipping {symbol}: Insufficient historical data.")
                 continue
 
             # Extract Fundamentals & Analyst Data
@@ -52,11 +55,11 @@ def run_screener():
             # Determine Signal
             signal = "Buy on Pullback" if (current_price > sma_200 and rsi < 45) else "Watchlist"
 
-            # Format Payload (We send ALL stocks now, no strict filtering here)
+            # Format Payload
             stock_data = {
                 "ticker": symbol,
                 "price": round(current_price, 2),
-                "pe": round(float(pe), 2) if pe else 999.0, # Use 999 if missing so it sorts to the bottom
+                "pe": round(float(pe), 2) if pe else 999.0,
                 "roe": round(float(roe * 100), 2),
                 "rsi": round(rsi, 2),
                 "target_mean": round(float(target_mean), 2) if target_mean else None,
@@ -71,12 +74,16 @@ def run_screener():
             requests.post(f"{WORKER_URL}/api/update-history", json={"ticker": symbol, "data": hist_data}, headers=HEADERS)
             
         except Exception as e:
+            # CRITICAL FIX: Log error but DO NOT stop the script
             print(f"Error processing {symbol}: {e}")
+            continue
 
-    # Push all fundamentals in one batch to the screener endpoint
+    # Push all fundamentals in one batch
     if payload_batch:
         res = requests.post(f"{WORKER_URL}/api/update-screener", json=payload_batch, headers=HEADERS)
-        print(f"Updated {len(payload_batch)} stocks in database: {res.status_code}")
+        print(f"Successfully updated {len(payload_batch)} stocks in database: {res.status_code}")
+    else:
+        print("WARNING: No stocks were successfully processed!")
 
 if __name__ == "__main__":
     run_screener()
